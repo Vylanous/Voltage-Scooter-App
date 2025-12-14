@@ -1,0 +1,145 @@
+// --- Configuration ---
+const CONFIG = {
+    tileUrl: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap contributors',
+    defaultLocation: [40.7128, -74.0060], // NYC Fallback
+    gpsOptions: {
+        enableHighAccuracy: true, 
+        maximumAge: 1000, 
+        timeout: 10000
+    }
+};
+
+// --- State ---
+const state = {
+    currentPos: null,
+    watchId: null,
+    isFollowing: true,
+    routingControl: null
+};
+
+// --- Initialization ---
+const map = L.map('map', {
+    zoomControl: false // We will add zoom control manually if needed, or rely on pinch
+}).setView(CONFIG.defaultLocation, 13);
+
+// Add Tile Layer
+L.tileLayer(CONFIG.tileUrl, {
+    attribution: CONFIG.attribution,
+    maxZoom: 19
+}).addTo(map);
+
+// User Marker (Blue circle)
+const userIcon = L.divIcon({
+    className: 'user-marker',
+    html: '<div style="width: 16px; height: 16px; background: #3b82f6; border: 3px solid white; border-radius: 50%; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11]
+});
+
+const userMarker = L.marker(CONFIG.defaultLocation, { icon: userIcon }).addTo(map);
+
+// Accuracy Circle
+const accuracyCircle = L.circle(CONFIG.defaultLocation, {
+    radius: 0,
+    fillColor: '#3b82f6',
+    fillOpacity: 0.1,
+    weight: 0
+}).addTo(map);
+
+// --- Routing Engine ---
+function initRouting(startLat, startLng) {
+    // Generate a destination nearby for demo purposes (0.01 degrees away)
+    const destLat = startLat + 0.01;
+    const destLng = startLng + 0.01;
+
+    state.routingControl = L.Routing.control({
+        waypoints: [
+            L.latLng(startLat, startLng),
+            L.latLng(destLat, destLng)
+        ],
+        routeWhileDragging: true, // Key feature: Draggable routes
+        showAlternatives: true,
+        lineOptions: {
+            styles: [{ color: '#3b82f6', opacity: 0.7, weight: 6 }]
+        },
+        // We style the container in CSS to be a bottom sheet
+        containerClassName: 'routing-container', 
+        addWaypoints: true,
+        draggableWaypoints: true,
+        fitSelectedRoutes: false // Don't zoom out automatically when moving
+    }).addTo(map);
+}
+
+// --- GPS Tracking ---
+function startTracking() {
+    if (!navigator.geolocation) {
+        alert("Geolocation is not supported by your browser");
+        return;
+    }
+
+    state.watchId = navigator.geolocation.watchPosition(
+        handlePositionSuccess,
+        handlePositionError,
+        CONFIG.gpsOptions
+    );
+}
+
+function handlePositionSuccess(position) {
+    const { latitude, longitude, accuracy, speed } = position.coords;
+    const newLatLng = [latitude, longitude];
+
+    state.currentPos = newLatLng;
+
+    // Update UI
+    document.querySelector('.dot').classList.add('active');
+    document.getElementById('gps-status').innerText = 'GPS Active';
+    
+    // Convert speed from m/s to km/h (default is 0)
+    const speedKmh = speed ? (speed * 3.6).toFixed(1) : '0.0';
+    document.getElementById('speed-val').innerText = speedKmh;
+
+    // Update Marker
+    userMarker.setLatLng(newLatLng);
+    accuracyCircle.setLatLng(newLatLng);
+    accuracyCircle.setRadius(accuracy);
+
+    // Initial Routing Setup (Run once)
+    if (!state.routingControl) {
+        initRouting(latitude, longitude);
+        map.setView(newLatLng, 16);
+    }
+
+    // Follow Mode
+    if (state.isFollowing) {
+        map.panTo(newLatLng, { animate: true });
+    }
+}
+
+function handlePositionError(err) {
+    console.warn('GPS Error:', err.message);
+    document.querySelector('.dot').classList.remove('active');
+    document.getElementById('gps-status').innerText = 'Weak Signal';
+}
+
+// --- Interaction Handlers ---
+
+// Recenter Button
+document.getElementById('btn-locate').addEventListener('click', () => {
+    state.isFollowing = true;
+    if (state.currentPos) {
+        map.setView(state.currentPos, 17);
+    } else {
+        // Trigger a fresh read if we don't have position yet
+        navigator.geolocation.getCurrentPosition(handlePositionSuccess, handlePositionError, CONFIG.gpsOptions);
+    }
+});
+
+// Stop following if user drags map manually
+map.on('dragstart', () => {
+    state.isFollowing = false;
+});
+
+// Start the app
+startTracking();
+
